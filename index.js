@@ -218,20 +218,13 @@ async function setDateRange(page, fromDate, toDate) {
     }
 
     // Click nút "Tìm kiếm"
-    const searchBtn = await page.$('button:has-text("Tìm kiếm"), button.search-btn, [class*="search"] button');
-    if (searchBtn) {
-      await searchBtn.click();
-      await delay(2000);
-    } else {
-      // Fallback: tìm button có text "Tìm kiếm"
-      const buttons = await page.$$("button");
-      for (const btn of buttons) {
-        const text = await page.evaluate(el => el.textContent, btn);
-        if (text && text.includes("Tìm kiếm")) {
-          await btn.click();
-          await delay(2000);
-          break;
-        }
+    const buttons = await page.$$("button");
+    for (const btn of buttons) {
+      const text = await page.evaluate(el => el.textContent?.trim(), btn);
+      if (text && text.includes("Tìm kiếm")) {
+        await btn.click();
+        await delay(2000);
+        break;
       }
     }
 
@@ -370,13 +363,14 @@ app.post("/api/shopee/orders", async (req, res) => {
 
       // Click nút đăng nhập
       await delay(500);
-      const loginBtn = await page.$('button[type="submit"], button:has-text("Đăng nhập")');
+      const loginBtn = await page.$('button[type="submit"]');
       if (loginBtn) {
         await loginBtn.click();
       } else {
+        // Tìm button có text "Đăng nhập"
         const buttons = await page.$$("button");
         for (const btn of buttons) {
-          const text = await page.evaluate((el) => el.textContent, btn);
+          const text = await page.evaluate((el) => el.textContent?.trim(), btn);
           if (text && text.includes("Đăng nhập")) {
             await btn.click();
             break;
