@@ -240,79 +240,83 @@ async function navigateToReportPage(page) {
   try {
     console.log(`   -> Đang vào trang Doanh thu qua menu...`);
 
-    // Bước 1: Click vào "Quản lý đơn hàng" trong sidebar
-    console.log(`   -> Bước 1: Tìm menu "Quản lý đơn hàng"...`);
-
-    // Tìm và click menu chính
-    const menuItems = await page.$$('div, span, li, a');
-    let menuClicked = false;
-
-    for (const item of menuItems) {
-      const text = await page.evaluate(el => el.textContent?.trim(), item);
-      const isVisible = await page.evaluate(el => {
-        const style = window.getComputedStyle(el);
-        return style.display !== 'none' && style.visibility !== 'hidden' && el.offsetParent !== null;
-      }, item);
-
-      if (isVisible && text && text.includes('Quản lý đơn hàng') && text.length < 50) {
-        console.log(`   -> Tìm thấy: "${text}"`);
-        await item.click();
-        menuClicked = true;
-        break;
+    // Lấy URL hiện tại của trang Doanh thu từ menu
+    const reportUrl = await page.evaluate(() => {
+      // Tìm tất cả link trong sidebar
+      const allLinks = document.querySelectorAll('a');
+      for (const link of allLinks) {
+        const text = link.textContent?.trim();
+        const href = link.getAttribute('href');
+        // Tìm link "Doanh thu"
+        if (text === 'Doanh thu' && href) {
+          return link.href; // Trả về full URL
+        }
       }
-    }
+      return null;
+    });
 
-    if (menuClicked) {
-      console.log(`   -> Đã click "Quản lý đơn hàng", đợi submenu...`);
-      await delay(2000);
-    } else {
-      console.log(`   -> Không tìm thấy menu "Quản lý đơn hàng"`);
-    }
-
-    // Bước 2: Click vào "Doanh thu"
-    console.log(`   -> Bước 2: Tìm submenu "Doanh thu"...`);
-
-    const subMenuItems = await page.$$('div, span, li, a');
-    let subMenuClicked = false;
-
-    for (const item of subMenuItems) {
-      const text = await page.evaluate(el => el.textContent?.trim(), item);
-      const isVisible = await page.evaluate(el => {
-        const style = window.getComputedStyle(el);
-        return style.display !== 'none' && style.visibility !== 'hidden' && el.offsetParent !== null;
-      }, item);
-
-      if (isVisible && text === 'Doanh thu') {
-        console.log(`   -> Tìm thấy submenu: "${text}"`);
-        await item.click();
-        subMenuClicked = true;
-        break;
-      }
-    }
-
-    if (subMenuClicked) {
-      console.log(`   -> Đã click "Doanh thu", đợi trang load...`);
+    if (reportUrl) {
+      console.log(`   -> Tìm thấy URL Doanh thu: ${reportUrl}`);
+      // Navigate trực tiếp đến URL thay vì click
+      await page.goto(reportUrl, {
+        waitUntil: 'networkidle2',
+        timeout: 30000
+      });
       await delay(3000);
-      return true;
-    } else {
-      console.log(`   -> Không tìm thấy submenu "Doanh thu"`);
-    }
 
-    // Fallback: Thử tìm link có href chứa "report" hoặc "doanh"
-    console.log(`   -> Fallback: Tìm link báo cáo...`);
-    const links = await page.$$('a');
-    for (const link of links) {
-      const href = await page.evaluate(el => el.href, link);
-      const text = await page.evaluate(el => el.textContent?.trim(), link);
-      if (href && (href.includes('report') || href.includes('doanh') || href.includes('revenue'))) {
-        console.log(`   -> Tìm thấy link: ${href}`);
-        await link.click();
-        await delay(3000);
+      // Kiểm tra xem có vào đúng trang không
+      const pageTitle = await page.evaluate(() => {
+        const h1 = document.querySelector('h1, h2, [class*="title"]');
+        return h1?.textContent?.trim() || '';
+      });
+      console.log(`   -> Tiêu đề trang: "${pageTitle}"`);
+
+      if (pageTitle.includes('Doanh số') || pageTitle.includes('Doanh thu')) {
         return true;
       }
     }
 
-    console.log(`   -> Không tìm thấy cách nào để vào trang báo cáo`);
+    // Fallback: Thử click trực tiếp vào menu
+    console.log(`   -> Fallback: Click menu trực tiếp...`);
+
+    // Bước 1: Click "Quản lý đơn hàng" để mở submenu
+    await page.evaluate(() => {
+      const menuItems = document.querySelectorAll('div, span, li');
+      for (const item of menuItems) {
+        if (item.textContent?.trim() === 'Quản lý đơn hàng') {
+          item.click();
+          return true;
+        }
+      }
+      return false;
+    });
+    await delay(1500);
+
+    // Bước 2: Click link "Doanh thu"
+    const clicked = await page.evaluate(() => {
+      const links = document.querySelectorAll('a');
+      for (const link of links) {
+        if (link.textContent?.trim() === 'Doanh thu') {
+          // Sử dụng click event thay vì .click()
+          const event = new MouseEvent('click', {
+            bubbles: true,
+            cancelable: true,
+            view: window
+          });
+          link.dispatchEvent(event);
+          return true;
+        }
+      }
+      return false;
+    });
+
+    if (clicked) {
+      console.log(`   -> Đã click "Doanh thu"`);
+      await delay(3000);
+      return true;
+    }
+
+    console.log(`   -> Không tìm thấy cách vào trang Doanh thu`);
     return false;
   } catch (error) {
     console.log(`   [WARN] Không thể navigate qua menu: ${error.message}`);
