@@ -235,6 +235,72 @@ async function setDateRange(page, fromDate, toDate) {
   }
 }
 
+// Navigate to Doanh thu page via menu clicks
+async function navigateToReportPage(page) {
+  try {
+    console.log(`   -> Đang vào trang Doanh thu qua menu...`);
+
+    // Click vào "Quản lý đơn hàng" trong sidebar
+    const menuClicked = await page.evaluate(() => {
+      const menuItems = document.querySelectorAll('div, span, a, li');
+      for (const item of menuItems) {
+        const text = item.textContent?.trim();
+        if (text === 'Quản lý đơn hàng' || text?.includes('Quản lý đơn hàng')) {
+          if (item.offsetParent !== null) { // Element is visible
+            item.click();
+            return true;
+          }
+        }
+      }
+      return false;
+    });
+
+    if (menuClicked) {
+      await delay(1500);
+    }
+
+    // Click vào "Doanh thu"
+    const subMenuClicked = await page.evaluate(() => {
+      const items = document.querySelectorAll('div, span, a, li');
+      for (const item of items) {
+        const text = item.textContent?.trim();
+        if (text === 'Doanh thu') {
+          if (item.offsetParent !== null) {
+            item.click();
+            return true;
+          }
+        }
+      }
+      return false;
+    });
+
+    if (subMenuClicked) {
+      await delay(3000);
+      return true;
+    }
+
+    // Fallback: Thử click link trực tiếp nếu có
+    const linkClicked = await page.evaluate(() => {
+      const links = document.querySelectorAll('a[href*="report"], a[href*="doanh-thu"], a[href*="revenue"]');
+      if (links.length > 0) {
+        links[0].click();
+        return true;
+      }
+      return false;
+    });
+
+    if (linkClicked) {
+      await delay(3000);
+      return true;
+    }
+
+    return false;
+  } catch (error) {
+    console.log(`   [WARN] Không thể navigate qua menu: ${error.message}`);
+    return false;
+  }
+}
+
 async function extractOrders(page) {
   await delay(2000);
 
@@ -475,12 +541,9 @@ app.post("/api/shopee/orders", async (req, res) => {
     }
 
     // ===== 5. ĐÃ ĐĂNG NHẬP - LẤY ĐƠN HÀNG =====
-    console.log(`   -> Vào trang báo cáo doanh thu...`);
-    await page.goto("https://partner.shopee.vn/order/report-restaurant", {
-      waitUntil: "networkidle2",
-      timeout: 30000,
-    });
-    await delay(3000);
+    // Navigate qua menu thay vì URL trực tiếp
+    await navigateToReportPage(page);
+    await delay(2000);
 
     // Set date range nếu có
     if (fromDate && toDate) {
@@ -566,11 +629,9 @@ app.post("/api/shopee/confirm-otp", async (req, res) => {
       }
     }
 
-    // Vào trang báo cáo
-    await page.goto("https://partner.shopee.vn/order/report-restaurant", {
-      waitUntil: "networkidle2",
-    });
-    await delay(3000);
+    // Vào trang báo cáo qua menu
+    await navigateToReportPage(page);
+    await delay(2000);
 
     // Set date range nếu có
     if (fromDate && toDate) {
@@ -616,11 +677,9 @@ app.post("/api/shopee/select-store", async (req, res) => {
     await selectStore(page, storeIndex, storeName);
     await delay(3000);
 
-    // Vào trang báo cáo
-    await page.goto("https://partner.shopee.vn/order/report-restaurant", {
-      waitUntil: "networkidle2",
-    });
-    await delay(3000);
+    // Vào trang báo cáo qua menu
+    await navigateToReportPage(page);
+    await delay(2000);
 
     // Set date range nếu có
     if (fromDate && toDate) {
