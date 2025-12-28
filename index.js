@@ -240,60 +240,79 @@ async function navigateToReportPage(page) {
   try {
     console.log(`   -> Đang vào trang Doanh thu qua menu...`);
 
-    // Click vào "Quản lý đơn hàng" trong sidebar
-    const menuClicked = await page.evaluate(() => {
-      const menuItems = document.querySelectorAll('div, span, a, li');
-      for (const item of menuItems) {
-        const text = item.textContent?.trim();
-        if (text === 'Quản lý đơn hàng' || text?.includes('Quản lý đơn hàng')) {
-          if (item.offsetParent !== null) { // Element is visible
-            item.click();
-            return true;
-          }
-        }
+    // Bước 1: Click vào "Quản lý đơn hàng" trong sidebar
+    console.log(`   -> Bước 1: Tìm menu "Quản lý đơn hàng"...`);
+
+    // Tìm và click menu chính
+    const menuItems = await page.$$('div, span, li, a');
+    let menuClicked = false;
+
+    for (const item of menuItems) {
+      const text = await page.evaluate(el => el.textContent?.trim(), item);
+      const isVisible = await page.evaluate(el => {
+        const style = window.getComputedStyle(el);
+        return style.display !== 'none' && style.visibility !== 'hidden' && el.offsetParent !== null;
+      }, item);
+
+      if (isVisible && text && text.includes('Quản lý đơn hàng') && text.length < 50) {
+        console.log(`   -> Tìm thấy: "${text}"`);
+        await item.click();
+        menuClicked = true;
+        break;
       }
-      return false;
-    });
+    }
 
     if (menuClicked) {
-      await delay(1500);
+      console.log(`   -> Đã click "Quản lý đơn hàng", đợi submenu...`);
+      await delay(2000);
+    } else {
+      console.log(`   -> Không tìm thấy menu "Quản lý đơn hàng"`);
     }
 
-    // Click vào "Doanh thu"
-    const subMenuClicked = await page.evaluate(() => {
-      const items = document.querySelectorAll('div, span, a, li');
-      for (const item of items) {
-        const text = item.textContent?.trim();
-        if (text === 'Doanh thu') {
-          if (item.offsetParent !== null) {
-            item.click();
-            return true;
-          }
-        }
+    // Bước 2: Click vào "Doanh thu"
+    console.log(`   -> Bước 2: Tìm submenu "Doanh thu"...`);
+
+    const subMenuItems = await page.$$('div, span, li, a');
+    let subMenuClicked = false;
+
+    for (const item of subMenuItems) {
+      const text = await page.evaluate(el => el.textContent?.trim(), item);
+      const isVisible = await page.evaluate(el => {
+        const style = window.getComputedStyle(el);
+        return style.display !== 'none' && style.visibility !== 'hidden' && el.offsetParent !== null;
+      }, item);
+
+      if (isVisible && text === 'Doanh thu') {
+        console.log(`   -> Tìm thấy submenu: "${text}"`);
+        await item.click();
+        subMenuClicked = true;
+        break;
       }
-      return false;
-    });
+    }
 
     if (subMenuClicked) {
+      console.log(`   -> Đã click "Doanh thu", đợi trang load...`);
       await delay(3000);
       return true;
+    } else {
+      console.log(`   -> Không tìm thấy submenu "Doanh thu"`);
     }
 
-    // Fallback: Thử click link trực tiếp nếu có
-    const linkClicked = await page.evaluate(() => {
-      const links = document.querySelectorAll('a[href*="report"], a[href*="doanh-thu"], a[href*="revenue"]');
-      if (links.length > 0) {
-        links[0].click();
+    // Fallback: Thử tìm link có href chứa "report" hoặc "doanh"
+    console.log(`   -> Fallback: Tìm link báo cáo...`);
+    const links = await page.$$('a');
+    for (const link of links) {
+      const href = await page.evaluate(el => el.href, link);
+      const text = await page.evaluate(el => el.textContent?.trim(), link);
+      if (href && (href.includes('report') || href.includes('doanh') || href.includes('revenue'))) {
+        console.log(`   -> Tìm thấy link: ${href}`);
+        await link.click();
+        await delay(3000);
         return true;
       }
-      return false;
-    });
-
-    if (linkClicked) {
-      await delay(3000);
-      return true;
     }
 
+    console.log(`   -> Không tìm thấy cách nào để vào trang báo cáo`);
     return false;
   } catch (error) {
     console.log(`   [WARN] Không thể navigate qua menu: ${error.message}`);
