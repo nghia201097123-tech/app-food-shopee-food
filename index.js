@@ -306,11 +306,30 @@ async function extractOrders(page) {
 
   return await page.evaluate(() => {
     const orders = [];
-    const rows = document.querySelectorAll("table tbody tr");
 
-    rows.forEach((row) => {
+    // Thử nhiều selector khác nhau
+    let rows = document.querySelectorAll("table tbody tr");
+
+    // Fallback 1: table tr (không có tbody)
+    if (rows.length === 0) {
+      rows = document.querySelectorAll("table tr");
+    }
+
+    // Fallback 2: div table structure
+    if (rows.length === 0) {
+      rows = document.querySelectorAll("[class*='table'] [class*='row'], [class*='ant-table'] tr");
+    }
+
+    console.log('Found rows:', rows.length);
+
+    rows.forEach((row, index) => {
       const cells = row.querySelectorAll("td");
-      if (cells.length >= 7) {
+
+      // Skip header row
+      if (cells.length === 0) return;
+
+      // Có thể có 7 hoặc 8 cột
+      if (cells.length >= 6) {
         const order = {
           stt: cells[0]?.textContent?.trim(),
           nhaHang: cells[1]?.textContent?.trim(),
@@ -318,8 +337,8 @@ async function extractOrders(page) {
           tongTienTruocChietKhau: cells[3]?.textContent?.trim(),
           khuyenMai: cells[4]?.textContent?.trim(),
           phiDichVu: cells[5]?.textContent?.trim(),
-          thueKhauTru: cells[6]?.textContent?.trim(),
-          tongTien: cells[7]?.textContent?.trim(),
+          thueKhauTru: cells[6]?.textContent?.trim() || '',
+          tongTien: cells[7]?.textContent?.trim() || '',
         };
         if (order.stt && order.stt !== "Stt") {
           orders.push(order);
