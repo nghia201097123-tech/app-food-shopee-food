@@ -886,6 +886,103 @@ app.delete("/api/shopee/session/:sessionId", async (req, res) => {
   return res.status(404).json({ success: false, error: "Session không tồn tại" });
 });
 
+// ========== API: Nhận dữ liệu từ Chrome Extension ==========
+// Lưu trữ dữ liệu từ extension
+const extensionData = new Map();
+
+// CORS middleware cho extension
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
+// Nhận dữ liệu từ extension
+app.post("/api/extension/orders", (req, res) => {
+  const { userId, orders, total, storeName, dateRange, extractedAt } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({
+      success: false,
+      error: "Thiếu userId"
+    });
+  }
+
+  // Lưu dữ liệu
+  const dataKey = `${userId}_${Date.now()}`;
+  extensionData.set(dataKey, {
+    userId,
+    orders,
+    total,
+    storeName,
+    dateRange,
+    extractedAt,
+    receivedAt: new Date().toISOString()
+  });
+
+  console.log(`\n[Extension] Nhận ${orders?.length || 0} đơn hàng từ user: ${userId}`);
+  console.log(`   -> Store: ${storeName}`);
+  console.log(`   -> Date range: ${dateRange?.from} - ${dateRange?.to}`);
+
+  // Giữ data trong 1 giờ
+  setTimeout(() => {
+    extensionData.delete(dataKey);
+  }, 3600000);
+
+  return res.json({
+    success: true,
+    message: `Đã nhận ${orders?.length || 0} đơn hàng`,
+    dataKey: dataKey
+  });
+});
+
+// Lấy dữ liệu đã nhận từ extension
+app.get("/api/extension/orders/:userId", (req, res) => {
+  const { userId } = req.params;
+
+  // Tìm tất cả data của user này
+  const userData = [];
+  extensionData.forEach((data, key) => {
+    if (data.userId === userId) {
+      userData.push({ key, ...data });
+    }
+  });
+
+  if (userData.length === 0) {
+    return res.status(404).json({
+      success: false,
+      error: "Không tìm thấy dữ liệu của user này"
+    });
+  }
+
+  // Trả về data mới nhất
+  userData.sort((a, b) => new Date(b.receivedAt) - new Date(a.receivedAt));
+
+  return res.json({
+    success: true,
+    data: userData[0],
+    allData: userData
+  });
+});
+
+// Lấy tất cả dữ liệu extension đã nhận
+app.get("/api/extension/orders", (req, res) => {
+  const allData = [];
+  extensionData.forEach((data, key) => {
+    allData.push({ key, ...data });
+  });
+
+  return res.json({
+    success: true,
+    total: allData.length,
+    data: allData
+  });
+});
+
 // ========== Start Server ==========
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {

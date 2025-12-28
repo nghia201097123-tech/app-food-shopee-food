@@ -1,0 +1,5 @@
+/* Highlight khi đang extract */
+.shopee-extractor-highlight {
+  outline: 2px solid #ee4d2d !important;
+  outline-offset: 2px;
+}
