@@ -924,9 +924,29 @@ app.post("/api/extension/orders", (req, res) => {
     receivedAt: new Date().toISOString()
   });
 
-  console.log(`\n[Extension] Nhận ${orders?.length || 0} đơn hàng từ user: ${userId}`);
-  console.log(`   -> Store: ${storeName}`);
-  console.log(`   -> Date range: ${dateRange?.from} - ${dateRange?.to}`);
+  console.log(`\n========== [Extension] Nhận dữ liệu ==========`);
+  console.log(`User ID: ${userId}`);
+  console.log(`Store: ${storeName}`);
+  console.log(`Date range: ${dateRange?.from} - ${dateRange?.to}`);
+  console.log(`Extracted at: ${extractedAt}`);
+  console.log(`Total orders: ${orders?.length || 0}`);
+  console.log(`\n--- Chi tiết đơn hàng ---`);
+  if (orders && orders.length > 0) {
+    orders.forEach((order, index) => {
+      console.log(`[${index + 1}] ${order.nhaHang || 'N/A'}`);
+      console.log(`    Số lượng đơn: ${order.soLuongDon}`);
+      console.log(`    Tổng tiền trước CK: ${order.tongTienTruocChietKhau}`);
+      console.log(`    Khuyến mãi: ${order.khuyenMai}`);
+      console.log(`    Phí dịch vụ: ${order.phiDichVu}`);
+      console.log(`    Thuế khấu trừ: ${order.thueKhauTru}`);
+      console.log(`    Tổng tiền: ${order.tongTien}`);
+    });
+  } else {
+    console.log(`(Không có đơn hàng)`);
+  }
+  console.log(`\n--- Raw JSON ---`);
+  console.log(JSON.stringify(req.body, null, 2));
+  console.log(`================================================\n`);
 
   // Giữ data trong 1 giờ
   setTimeout(() => {
