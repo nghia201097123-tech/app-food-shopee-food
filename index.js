@@ -1,7 +1,11 @@
 const express = require("express");
-const puppeteer = require("puppeteer");
+const puppeteer = require("puppeteer-extra");
+const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 const fs = require("fs");
 const path = require("path");
+
+// Sử dụng Stealth Plugin để tránh bị detect
+puppeteer.use(StealthPlugin());
 
 const app = express();
 app.use(express.json());
@@ -39,11 +43,12 @@ async function createBrowser(userId, headless = true) {
       "--disable-dev-shm-usage",
       "--disable-accelerated-2d-canvas",
       "--disable-gpu",
-      "--window-size=1200,800",
-      "--disable-web-security",
-      "--disable-features=IsolateOrigins,site-per-process",
+      "--window-size=1366,768",
+      "--disable-blink-features=AutomationControlled",
+      "--disable-infobars",
     ],
-    defaultViewport: { width: 1200, height: 800 },
+    ignoreDefaultArgs: ["--enable-automation"],
+    defaultViewport: { width: 1366, height: 768 },
     timeout: 60000,
   };
 
@@ -61,7 +66,42 @@ async function createBrowser(userId, headless = true) {
     }
   }
 
-  return await puppeteer.launch(launchOptions);
+  const browser = await puppeteer.launch(launchOptions);
+  return browser;
+}
+
+// Thiết lập page để tránh bị detect
+async function setupStealthPage(page) {
+  // Ẩn webdriver
+  await page.evaluateOnNewDocument(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => false });
+
+    // Fake chrome runtime
+    window.chrome = { runtime: {} };
+
+    // Fake plugins
+    Object.defineProperty(navigator, 'plugins', {
+      get: () => [1, 2, 3, 4, 5]
+    });
+
+    // Fake languages
+    Object.defineProperty(navigator, 'languages', {
+      get: () => ['vi-VN', 'vi', 'en-US', 'en']
+    });
+
+    // Fake permissions
+    const originalQuery = window.navigator.permissions.query;
+    window.navigator.permissions.query = (parameters) => (
+      parameters.name === 'notifications' ?
+        Promise.resolve({ state: Notification.permission }) :
+        originalQuery(parameters)
+    );
+  });
+
+  // Set viewport và user agent thực tế
+  await page.setUserAgent(
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  );
 }
 
 async function checkLoginStatus(page) {
@@ -434,10 +474,8 @@ app.post("/api/shopee/orders", async (req, res) => {
     browser = await createBrowser(userId, headless);
     page = await browser.newPage();
 
-    // Set user agent để tránh bị detect
-    await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    );
+    // Thiết lập stealth mode để tránh bị detect
+    await setupStealthPage(page);
 
     console.log(`   -> Vào trang Shopee Partner...`);
     await page.goto("https://partner.shopee.vn/", {
@@ -764,6 +802,9 @@ app.post("/api/shopee/stores", async (req, res) => {
   try {
     browser = await createBrowser(userId, headless);
     page = await browser.newPage();
+
+    // Thiết lập stealth mode
+    await setupStealthPage(page);
 
     await page.goto("https://partner.shopee.vn/", {
       waitUntil: "networkidle2",
