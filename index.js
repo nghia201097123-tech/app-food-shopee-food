@@ -30,8 +30,8 @@ async function createBrowser(userId, headless = true) {
     fs.mkdirSync(userDataDir, { recursive: true });
   }
 
-  return await puppeteer.launch({
-    headless: headless,
+  const launchOptions = {
+    headless: headless ? "new" : false,
     userDataDir: userDataDir,
     args: [
       "--no-sandbox",
@@ -40,9 +40,28 @@ async function createBrowser(userId, headless = true) {
       "--disable-accelerated-2d-canvas",
       "--disable-gpu",
       "--window-size=1200,800",
+      "--disable-web-security",
+      "--disable-features=IsolateOrigins,site-per-process",
     ],
     defaultViewport: { width: 1200, height: 800 },
-  });
+    timeout: 60000,
+  };
+
+  // Thử dùng Chrome có sẵn trên Mac
+  const possiblePaths = [
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/usr/bin/google-chrome",
+    "/usr/bin/chromium-browser",
+  ];
+
+  for (const chromePath of possiblePaths) {
+    if (fs.existsSync(chromePath)) {
+      launchOptions.executablePath = chromePath;
+      break;
+    }
+  }
+
+  return await puppeteer.launch(launchOptions);
 }
 
 async function checkLoginStatus(page) {
@@ -320,7 +339,7 @@ app.post("/api/shopee/orders", async (req, res) => {
     );
 
     console.log(`   -> Vào trang Shopee Partner...`);
-    await page.goto("https://partner.shopeefood.vn/", {
+    await page.goto("https://partner.shopee.vn/", {
       waitUntil: "networkidle2",
       timeout: 30000,
     });
@@ -463,7 +482,7 @@ app.post("/api/shopee/orders", async (req, res) => {
 
     // ===== 5. ĐÃ ĐĂNG NHẬP - LẤY ĐƠN HÀNG =====
     console.log(`   -> Vào trang báo cáo doanh thu...`);
-    await page.goto("https://partner.shopeefood.vn/order/report-restaurant", {
+    await page.goto("https://partner.shopee.vn/order/report-restaurant", {
       waitUntil: "networkidle2",
       timeout: 30000,
     });
@@ -554,7 +573,7 @@ app.post("/api/shopee/confirm-otp", async (req, res) => {
     }
 
     // Vào trang báo cáo
-    await page.goto("https://partner.shopeefood.vn/order/report-restaurant", {
+    await page.goto("https://partner.shopee.vn/order/report-restaurant", {
       waitUntil: "networkidle2",
     });
     await delay(3000);
@@ -604,7 +623,7 @@ app.post("/api/shopee/select-store", async (req, res) => {
     await delay(3000);
 
     // Vào trang báo cáo
-    await page.goto("https://partner.shopeefood.vn/order/report-restaurant", {
+    await page.goto("https://partner.shopee.vn/order/report-restaurant", {
       waitUntil: "networkidle2",
     });
     await delay(3000);
@@ -651,7 +670,7 @@ app.post("/api/shopee/stores", async (req, res) => {
     browser = await createBrowser(userId, headless);
     page = await browser.newPage();
 
-    await page.goto("https://partner.shopeefood.vn/", {
+    await page.goto("https://partner.shopee.vn/", {
       waitUntil: "networkidle2",
       timeout: 30000,
     });
