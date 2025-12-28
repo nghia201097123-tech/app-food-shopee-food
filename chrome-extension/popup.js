@@ -1,9 +1,11 @@
 // Lưu trữ dữ liệu đã extract
 let extractedData = null;
+let autoSyncInterval = null;
+let syncCount = 0;
 
 // Load saved settings
 document.addEventListener('DOMContentLoaded', async () => {
-  const saved = await chrome.storage.local.get(['userId', 'serverUrl', 'fromDate', 'toDate']);
+  const saved = await chrome.storage.local.get(['userId', 'serverUrl', 'fromDate', 'toDate', 'autoSync']);
 
   if (saved.userId) document.getElementById('userId').value = saved.userId;
   if (saved.serverUrl) document.getElementById('serverUrl').value = saved.serverUrl;
@@ -14,6 +16,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   document.getElementById('fromDate').value = saved.fromDate || firstDay;
   document.getElementById('toDate').value = saved.toDate || today;
+
+  // Restore auto-sync state
+  if (saved.autoSync) {
+    document.getElementById('autoSync').checked = true;
+    startAutoSync();
+  }
 });
 
 // Save settings on change
@@ -30,6 +38,13 @@ function showStatus(message, type = 'info') {
   status.className = `status show ${type}`;
 }
 
+// Show sync status
+function showSyncStatus(message) {
+  const syncStatus = document.getElementById('syncStatus');
+  syncStatus.textContent = message;
+  syncStatus.style.display = 'block';
+}
+
 // Show result
 function showResult(data) {
   const result = document.getElementById('result');
@@ -38,25 +53,15 @@ function showResult(data) {
   result.className = 'result show';
 }
 
-// Extract button click
-document.getElementById('extractBtn').addEventListener('click', async () => {
-  const btn = document.getElementById('extractBtn');
-  btn.disabled = true;
-  btn.textContent = 'Đang lấy...';
-  showStatus('Đang extract dữ liệu từ trang...', 'info');
-
+// Extract data function (reusable)
+async function extractData() {
   try {
-    // Get current tab
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
     if (!tab.url.includes('partner.shopee.vn')) {
-      showStatus('Vui lòng mở trang partner.shopee.vn trước!', 'error');
-      btn.disabled = false;
-      btn.textContent = 'Lấy dữ liệu';
-      return;
+      return { success: false, error: 'Không phải trang Shopee Partner' };
     }
 
-    // Send message to content script
     const response = await chrome.tabs.sendMessage(tab.id, {
       action: 'extractData',
       fromDate: document.getElementById('fromDate').value,
@@ -64,25 +69,123 @@ document.getElementById('extractBtn').addEventListener('click', async () => {
     });
 
     if (response && response.success) {
-      extractedData = {
-        userId: document.getElementById('userId').value,
-        orders: response.orders,
-        total: response.orders.length,
-        storeName: response.storeName,
-        dateRange: {
-          from: document.getElementById('fromDate').value,
-          to: document.getElementById('toDate').value
-        },
-        extractedAt: new Date().toISOString()
+      return {
+        success: true,
+        data: {
+          userId: document.getElementById('userId').value,
+          orders: response.orders,
+          total: response.orders.length,
+          storeName: response.storeName,
+          dateRange: {
+            from: document.getElementById('fromDate').value,
+            to: document.getElementById('toDate').value
+          },
+          extractedAt: new Date().toISOString()
+        }
       };
-
-      showStatus(`Lấy được ${response.orders.length} đơn hàng!`, 'success');
-      showResult(extractedData);
-    } else {
-      showStatus(response?.error || 'Không thể extract dữ liệu', 'error');
     }
+    return { success: false, error: response?.error || 'Không thể extract' };
   } catch (error) {
-    showStatus(`Lỗi: ${error.message}. Hãy refresh trang và thử lại.`, 'error');
+    return { success: false, error: error.message };
+  }
+}
+
+// Send data to server function (reusable)
+async function sendToServer(data) {
+  try {
+    const serverUrl = document.getElementById('serverUrl').value;
+    const response = await fetch(`${serverUrl}/api/extension/orders`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(data)
+    });
+
+    const result = await response.json();
+    return result;
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+// Auto sync function
+async function doAutoSync() {
+  syncCount++;
+  const now = new Date().toLocaleTimeString('vi-VN');
+  showSyncStatus(`[${now}] Đang sync lần ${syncCount}...`);
+
+  // Extract
+  const extractResult = await extractData();
+  if (!extractResult.success) {
+    showSyncStatus(`[${now}] Lỗi extract: ${extractResult.error}`);
+    return;
+  }
+
+  extractedData = extractResult.data;
+  showResult(extractedData);
+
+  // Send
+  const sendResult = await sendToServer(extractedData);
+  if (sendResult.success) {
+    showSyncStatus(`[${now}] Sync OK - ${extractedData.orders.length} đơn`);
+    showStatus(`Auto sync: ${extractedData.orders.length} đơn hàng`, 'success');
+  } else {
+    showSyncStatus(`[${now}] Lỗi gửi: ${sendResult.error}`);
+  }
+}
+
+// Start auto sync
+function startAutoSync() {
+  if (autoSyncInterval) return;
+
+  syncCount = 0;
+  showSyncStatus('Auto sync đang chạy...');
+
+  // Run immediately first
+  doAutoSync();
+
+  // Then every 5 seconds
+  autoSyncInterval = setInterval(doAutoSync, 5000);
+}
+
+// Stop auto sync
+function stopAutoSync() {
+  if (autoSyncInterval) {
+    clearInterval(autoSyncInterval);
+    autoSyncInterval = null;
+  }
+  document.getElementById('syncStatus').style.display = 'none';
+  showStatus('Auto sync đã tắt', 'info');
+}
+
+// Auto sync toggle
+document.getElementById('autoSync').addEventListener('change', async (e) => {
+  const enabled = e.target.checked;
+  await chrome.storage.local.set({ autoSync: enabled });
+
+  if (enabled) {
+    startAutoSync();
+  } else {
+    stopAutoSync();
+  }
+});
+
+// Extract button click
+document.getElementById('extractBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('extractBtn');
+  btn.disabled = true;
+  btn.textContent = 'Đang lấy...';
+  showStatus('Đang extract dữ liệu từ trang...', 'info');
+
+  const result = await extractData();
+
+  if (result.success) {
+    extractedData = result.data;
+    showStatus(`Lấy được ${extractedData.orders.length} đơn hàng!`, 'success');
+    showResult(extractedData);
+  } else {
+    showStatus(`Lỗi: ${result.error}. Hãy refresh trang và thử lại.`, 'error');
   }
 
   btn.disabled = false;
@@ -101,25 +204,12 @@ document.getElementById('sendBtn').addEventListener('click', async () => {
   btn.textContent = 'Đang gửi...';
   showStatus('Đang gửi dữ liệu lên server...', 'info');
 
-  try {
-    const serverUrl = document.getElementById('serverUrl').value;
-    const response = await fetch(`${serverUrl}/api/extension/orders`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(extractedData)
-    });
+  const result = await sendToServer(extractedData);
 
-    const result = await response.json();
-
-    if (result.success) {
-      showStatus('Đã gửi dữ liệu thành công!', 'success');
-    } else {
-      showStatus(`Lỗi: ${result.error}`, 'error');
-    }
-  } catch (error) {
-    showStatus(`Không thể kết nối server: ${error.message}`, 'error');
+  if (result.success) {
+    showStatus('Đã gửi dữ liệu thành công!', 'success');
+  } else {
+    showStatus(`Lỗi: ${result.error}`, 'error');
   }
 
   btn.disabled = false;
