@@ -1003,6 +1003,75 @@ app.get("/api/extension/orders", (req, res) => {
   });
 });
 
+// ========== API: Gọi trực tiếp Shopee API ==========
+app.post("/api/shopee/direct/orders", async (req, res) => {
+  const {
+    accessToken,
+    entityId,
+    clientId,
+    orderFilterType = 30,
+    requestCount = 50,
+    sortType = 6,
+    nextItemId = ""
+  } = req.body;
+
+  if (!accessToken || !entityId) {
+    return res.status(400).json({
+      success: false,
+      error: "Thiếu accessToken hoặc entityId"
+    });
+  }
+
+  console.log(`\n========== [Direct API] Gọi Shopee API ==========`);
+  console.log(`Entity ID: ${entityId}`);
+  console.log(`Filter Type: ${orderFilterType}`);
+  console.log(`Request Count: ${requestCount}`);
+
+  try {
+    const response = await fetch("https://gmerchant.deliverynow.vn/api/v5/order/get_list", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/plain, */*",
+        "x-foody-access-token": accessToken,
+        "x-foody-entity-id": entityId.toString(),
+        "x-foody-client-id": clientId || "CD1C90F850C14104827124E1AC7F263A",
+        "x-foody-client-language": "vi",
+        "x-foody-api-version": "1",
+        "x-foody-app-type": "1024",
+        "x-foody-client-type": "1",
+        "x-foody-client-version": "3.0.0",
+        "operate-source": "partnerapp",
+        "User-Agent": "language=vi app_type=2 shopee-partner appver=35301 (iOS 18.6.2) secid=4002 food_rn_ver=7566 spp_rn_ver=7408"
+      },
+      body: JSON.stringify({
+        order_filter_type: orderFilterType,
+        next_item_id: nextItemId,
+        request_count: requestCount,
+        sort_type: sortType
+      })
+    });
+
+    const data = await response.json();
+
+    console.log(`Response status: ${response.status}`);
+    console.log(`Response data:`, JSON.stringify(data, null, 2));
+    console.log(`================================================\n`);
+
+    return res.json({
+      success: true,
+      statusCode: response.status,
+      data: data
+    });
+  } catch (error) {
+    console.log(`Error: ${error.message}`);
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // ========== Start Server ==========
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
