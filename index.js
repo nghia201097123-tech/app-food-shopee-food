@@ -1066,6 +1066,37 @@ app.post("/api/shopee/direct/orders", async (req, res) => {
   }
 });
 
+// ========== API: Nhận data từ iOS Shortcut ==========
+app.post("/api/shortcut/orders", (req, res) => {
+  const { userId, entityId, accessToken, orders } = req.body;
+
+  console.log(`\n========== [iOS Shortcut] Nhận dữ liệu ==========`);
+  console.log(`User ID: ${userId}`);
+  console.log(`Entity ID: ${entityId}`);
+  console.log(`Orders count: ${orders?.data?.length || orders?.length || 0}`);
+  console.log(`Raw data:`, JSON.stringify(req.body, null, 2));
+  console.log(`================================================\n`);
+
+  // Lưu data
+  const dataKey = `shortcut_${userId}_${Date.now()}`;
+  extensionData.set(dataKey, {
+    userId,
+    entityId,
+    source: 'ios-shortcut',
+    data: orders,
+    receivedAt: new Date().toISOString()
+  });
+
+  // Auto cleanup sau 1 giờ
+  setTimeout(() => extensionData.delete(dataKey), 3600000);
+
+  return res.json({
+    success: true,
+    message: `Đã nhận data từ iOS Shortcut`,
+    dataKey: dataKey
+  });
+});
+
 // ========== Start Server ==========
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
