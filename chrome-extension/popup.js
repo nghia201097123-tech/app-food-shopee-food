@@ -7,15 +7,17 @@ let syncCount = 0;
 const API_STORE_LIST = 'https://app.partner.shopee.vn/mss/app-api/PartnerRNServer/GetStoreList';
 const API_ORDER_LIST = 'https://gmerchant.deliverynow.vn/api/v5/order/get_list';
 
+// All field IDs
+const FIELD_IDS = ['userId', 'serverUrl', 'accessToken', 'entityId', 'userAgent', 'xSfTraceId', 'xSfRequestId', 'xSapRi', 'spcBOft', 'signatureHeaders'];
+
 // Load saved settings
 document.addEventListener('DOMContentLoaded', async () => {
-  const saved = await chrome.storage.local.get(['userId', 'serverUrl', 'accessToken', 'entityId', 'userAgent', 'autoSync']);
+  const saved = await chrome.storage.local.get([...FIELD_IDS, 'autoSync']);
 
-  if (saved.userId) document.getElementById('userId').value = saved.userId;
-  if (saved.serverUrl) document.getElementById('serverUrl').value = saved.serverUrl;
-  if (saved.accessToken) document.getElementById('accessToken').value = saved.accessToken;
-  if (saved.entityId) document.getElementById('entityId').value = saved.entityId;
-  if (saved.userAgent) document.getElementById('userAgent').value = saved.userAgent;
+  FIELD_IDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (el && saved[id]) el.value = saved[id];
+  });
 
   // Restore auto-sync state
   if (saved.autoSync) {
@@ -25,10 +27,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // Save settings on change
-['userId', 'serverUrl', 'accessToken', 'entityId', 'userAgent'].forEach(id => {
-  document.getElementById(id).addEventListener('change', async (e) => {
-    await chrome.storage.local.set({ [id]: e.target.value });
-  });
+FIELD_IDS.forEach(id => {
+  const el = document.getElementById(id);
+  if (el) {
+    el.addEventListener('change', async (e) => {
+      await chrome.storage.local.set({ [id]: e.target.value });
+    });
+  }
 });
 
 // Show status message
@@ -51,6 +56,25 @@ function showResult(data) {
   const resultData = document.getElementById('resultData');
   resultData.textContent = JSON.stringify(data, null, 2);
   result.className = 'result show';
+}
+
+// Parse signature headers from textarea
+function parseSignatureHeaders(text) {
+  const headers = {};
+  if (!text) return headers;
+
+  const lines = text.split('\n');
+  lines.forEach(line => {
+    const colonIndex = line.indexOf(':');
+    if (colonIndex > 0) {
+      const key = line.substring(0, colonIndex).trim();
+      const value = line.substring(colonIndex + 1).trim();
+      if (key && value) {
+        headers[key] = value;
+      }
+    }
+  });
+  return headers;
 }
 
 // Get Store List API
@@ -88,7 +112,14 @@ async function fetchStoreList() {
 async function fetchOrderList() {
   const accessToken = document.getElementById('accessToken').value.trim();
   const entityId = document.getElementById('entityId').value.trim();
-  const userAgent = document.getElementById('userAgent').value.trim() || 'language=vi app_type=29';
+  const userAgent = document.getElementById('userAgent').value.trim() || 'language=vi app_type=2';
+
+  // Security headers
+  const xSfTraceId = document.getElementById('xSfTraceId').value.trim();
+  const xSfRequestId = document.getElementById('xSfRequestId').value.trim();
+  const xSapRi = document.getElementById('xSapRi').value.trim();
+  const spcBOft = document.getElementById('spcBOft').value.trim();
+  const signatureHeaders = parseSignatureHeaders(document.getElementById('signatureHeaders').value);
 
   if (!accessToken) {
     return { success: false, error: 'Chưa nhập Access Token' };
@@ -97,25 +128,37 @@ async function fetchOrderList() {
     return { success: false, error: 'Chưa nhập Entity ID (ID cửa hàng)' };
   }
 
+  // Build headers
+  const headers = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json, text/plain, */*',
+    'Accept-Encoding': 'gzip, deflate',
+    'Accept-Language': 'vi-VN,vi,fr-FR,fr,en-US,en',
+    'user-agent': userAgent,
+    'x-foody-client-id': 'CD1C90F850C14104827124E1AC7F263A',
+    'x-foody-access-token': accessToken,
+    'x-foody-entity-id': entityId,
+    'x-foody-client-language': 'vi',
+    'x-foody-api-version': '1',
+    'x-foody-app-type': '1024',
+    'x-foody-client-type': '1',
+    'x-foody-client-version': '3.0.0',
+    'operate-source': 'partnerapp'
+  };
+
+  // Add optional security headers
+  if (xSfTraceId) headers['x-sf-trace-id'] = xSfTraceId;
+  if (xSfRequestId) headers['x-sf-request-id'] = xSfRequestId;
+  if (xSapRi) headers['x-sap-ri'] = xSapRi;
+  if (spcBOft) headers['spc-b-oft'] = spcBOft;
+
+  // Add signature headers
+  Object.assign(headers, signatureHeaders);
+
   try {
     const response = await fetch(API_ORDER_LIST, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json, text/plain, */*',
-        'Accept-Encoding': 'gzip, deflate',
-        'Accept-Language': 'vi-VN,vi,fr-FR,fr,en-US,en',
-        'user-agent': userAgent,
-        'x-foody-client-id': 'CD1C90F850C14104827124E1AC7F263A',
-        'x-foody-access-token': accessToken,
-        'x-foody-entity-id': entityId,
-        'x-foody-client-language': 'vi',
-        'x-foody-api-version': '1',
-        'x-foody-app-type': '1024',
-        'x-foody-client-type': '1',
-        'x-foody-client-version': '3.0.0',
-        'operate-source': 'partnerapp'
-      },
+      headers: headers,
       body: JSON.stringify({
         order_filter_type: 31,
         next_item_id: '',
