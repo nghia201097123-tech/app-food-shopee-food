@@ -103,6 +103,7 @@ async function fetchOrderList() {
         'Accept': 'application/json, text/plain, */*',
         'Accept-Encoding': 'gzip, deflate',
         'Accept-Language': 'vi-VN,vi,fr-FR,fr,en-US,en',
+        'user-agent': 'language=vi app_type=29',
         'x-foody-client-id': 'CD1C90F850C14104827124E1AC7F263A',
         'x-foody-access-token': accessToken,
         'x-foody-entity-id': entityId,
