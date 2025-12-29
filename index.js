@@ -1148,7 +1148,7 @@ app.post("/api/customers", (req, res) => {
     accessToken,     // x-foody-access-token
     xSfTraceId,      // x-sf-trace-id (optional)
     spcBOft,         // spc-b-oft (optional)
-    userAgent = "language=vi app_type=29"
+    userAgent = "language=vi app_type=2"
   } = req.body;
 
   if (!customerId || !entityId || !accessToken) {
@@ -1252,7 +1252,7 @@ app.delete("/api/customers/:customerId", (req, res) => {
 
 // ========== FETCH ĐƠN HÀNG TỰ ĐỘNG ==========
 
-// Hàm gọi API Shopee cho 1 khách hàng (dùng Shortcut trên macOS)
+// Hàm gọi API Shopee cho 1 khách hàng
 async function fetchOrdersForCustomer(customer) {
   const {
     customerId,
@@ -1268,16 +1268,11 @@ async function fetchOrdersForCustomer(customer) {
   try {
     const headers = {
       "Content-Type": "application/json",
-      "Accept": "application/json",
-      "user-agent": userAgent || "language=vi app_type=29",
-      "x-foody-client-id": "CD1C90F850C14104827124E1AC7F263A",
+      "user-agent": userAgent || "language=vi app_type=2",
       "x-foody-access-token": accessToken,
-      "x-foody-entity-id": entityId,
-      "x-foody-client-type": "1",
       "x-foody-app-type": "1024",
-      "x-foody-api-version": "1",
-      "x-foody-client-language": "vi",
-      "x-foody-client-version": "3.0.0"
+      "x-foody-client-type": "1",
+      "x-foody-entity-id": entityId
     };
 
     // Thêm optional headers nếu có
