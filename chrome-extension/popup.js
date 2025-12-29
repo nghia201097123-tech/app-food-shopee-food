@@ -1,21 +1,18 @@
-// Lưu trữ dữ liệu đã extract
-let extractedData = null;
+// Lưu trữ dữ liệu đã fetch
+let fetchedData = null;
 let autoSyncInterval = null;
 let syncCount = 0;
 
+// Shopee API URL
+const SHOPEE_API_URL = 'https://app.partner.shopee.vn/mss/app-api/PartnerRNServer/GetStoreList';
+
 // Load saved settings
 document.addEventListener('DOMContentLoaded', async () => {
-  const saved = await chrome.storage.local.get(['userId', 'serverUrl', 'fromDate', 'toDate', 'autoSync']);
+  const saved = await chrome.storage.local.get(['userId', 'serverUrl', 'merchantToken', 'autoSync']);
 
   if (saved.userId) document.getElementById('userId').value = saved.userId;
   if (saved.serverUrl) document.getElementById('serverUrl').value = saved.serverUrl;
-
-  // Set default dates
-  const today = new Date().toISOString().split('T')[0];
-  const firstDay = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
-
-  document.getElementById('fromDate').value = saved.fromDate || firstDay;
-  document.getElementById('toDate').value = saved.toDate || today;
+  if (saved.merchantToken) document.getElementById('merchantToken').value = saved.merchantToken;
 
   // Restore auto-sync state
   if (saved.autoSync) {
@@ -25,7 +22,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // Save settings on change
-['userId', 'serverUrl', 'fromDate', 'toDate'].forEach(id => {
+['userId', 'serverUrl', 'merchantToken'].forEach(id => {
   document.getElementById(id).addEventListener('change', async (e) => {
     await chrome.storage.local.set({ [id]: e.target.value });
   });
@@ -53,53 +50,57 @@ function showResult(data) {
   result.className = 'result show';
 }
 
-// Extract data function (reusable)
-async function extractData() {
+// Call Shopee API directly
+async function callShopeeApi() {
+  const merchantToken = document.getElementById('merchantToken').value.trim();
+
+  if (!merchantToken) {
+    return { success: false, error: 'Chưa nhập Merchant Token' };
+  }
+
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
-    if (!tab.url.includes('partner.shopee.vn')) {
-      return { success: false, error: 'Không phải trang Shopee Partner' };
-    }
-
-    const response = await chrome.tabs.sendMessage(tab.id, {
-      action: 'extractData',
-      fromDate: document.getElementById('fromDate').value,
-      toDate: document.getElementById('toDate').value
+    const response = await fetch(SHOPEE_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/plain, */*',
+        'x-merchant-token': merchantToken
+      },
+      body: JSON.stringify({})
     });
 
-    if (response && response.success) {
-      return {
-        success: true,
-        data: {
-          userId: document.getElementById('userId').value,
-          orders: response.orders,
-          total: response.orders.length,
-          storeName: response.storeName,
-          dateRange: {
-            from: document.getElementById('fromDate').value,
-            to: document.getElementById('toDate').value
-          },
-          extractedAt: new Date().toISOString()
-        }
-      };
-    }
-    return { success: false, error: response?.error || 'Không thể extract' };
+    const data = await response.json();
+
+    return {
+      success: response.ok,
+      statusCode: response.status,
+      data: data
+    };
   } catch (error) {
     return { success: false, error: error.message };
   }
 }
 
-// Send data to server function (reusable)
+// Send data to server
 async function sendToServer(data) {
   try {
     const serverUrl = document.getElementById('serverUrl').value;
+    const userId = document.getElementById('userId').value;
+
+    const payload = {
+      userId: userId,
+      source: 'shopee-api',
+      apiEndpoint: SHOPEE_API_URL,
+      data: data,
+      fetchedAt: new Date().toISOString()
+    };
+
     const response = await fetch(`${serverUrl}/api/extension/orders`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(data)
+      body: JSON.stringify(payload)
     });
 
     const result = await response.json();
@@ -113,40 +114,44 @@ async function sendToServer(data) {
 async function doAutoSync() {
   syncCount++;
   const now = new Date().toLocaleTimeString('vi-VN');
-  showSyncStatus(`[${now}] Đang sync lần ${syncCount}...`);
+  showSyncStatus(`[${now}] Đang gọi API lần ${syncCount}...`);
 
-  // Extract
-  const extractResult = await extractData();
-  if (!extractResult.success) {
-    showSyncStatus(`[${now}] Lỗi extract: ${extractResult.error}`);
+  // Call Shopee API
+  const apiResult = await callShopeeApi();
+
+  if (!apiResult.success) {
+    showSyncStatus(`[${now}] Lỗi API: ${apiResult.error || 'Unknown'}`);
+    showStatus(`Lỗi: ${apiResult.error || JSON.stringify(apiResult.data)}`, 'error');
     return;
   }
 
-  extractedData = extractResult.data;
-  showResult(extractedData);
+  fetchedData = apiResult.data;
+  showResult(fetchedData);
 
-  // Send
-  const sendResult = await sendToServer(extractedData);
+  // Send to server
+  const sendResult = await sendToServer(fetchedData);
+
   if (sendResult.success) {
-    showSyncStatus(`[${now}] Sync OK - ${extractedData.orders.length} đơn`);
-    showStatus(`Auto sync: ${extractedData.orders.length} đơn hàng`, 'success');
+    const storeCount = fetchedData?.data?.length || 0;
+    showSyncStatus(`[${now}] Sync OK - ${storeCount} stores`);
+    showStatus(`Auto sync: ${storeCount} stores`, 'success');
   } else {
-    showSyncStatus(`[${now}] Lỗi gửi: ${sendResult.error}`);
+    showSyncStatus(`[${now}] Lỗi gửi server: ${sendResult.error}`);
   }
 }
 
-// Start auto sync
+// Start auto sync (10 seconds)
 function startAutoSync() {
   if (autoSyncInterval) return;
 
   syncCount = 0;
-  showSyncStatus('Auto sync đang chạy...');
+  showSyncStatus('Auto sync đang chạy (10s)...');
 
   // Run immediately first
   doAutoSync();
 
-  // Then every 5 seconds
-  autoSyncInterval = setInterval(doAutoSync, 5000);
+  // Then every 10 seconds
+  autoSyncInterval = setInterval(doAutoSync, 10000);
 }
 
 // Stop auto sync
@@ -171,31 +176,35 @@ document.getElementById('autoSync').addEventListener('change', async (e) => {
   }
 });
 
-// Extract button click
-document.getElementById('extractBtn').addEventListener('click', async () => {
-  const btn = document.getElementById('extractBtn');
+// Fetch API button click
+document.getElementById('fetchApiBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('fetchApiBtn');
   btn.disabled = true;
-  btn.textContent = 'Đang lấy...';
-  showStatus('Đang extract dữ liệu từ trang...', 'info');
+  btn.textContent = 'Đang gọi API...';
+  showStatus('Đang gọi Shopee API...', 'info');
 
-  const result = await extractData();
+  const result = await callShopeeApi();
 
   if (result.success) {
-    extractedData = result.data;
-    showStatus(`Lấy được ${extractedData.orders.length} đơn hàng!`, 'success');
-    showResult(extractedData);
+    fetchedData = result.data;
+    const storeCount = result.data?.data?.length || 0;
+    showStatus(`Thành công! Lấy được ${storeCount} stores`, 'success');
+    showResult(fetchedData);
   } else {
-    showStatus(`Lỗi: ${result.error}. Hãy refresh trang và thử lại.`, 'error');
+    showStatus(`Lỗi: ${result.error || JSON.stringify(result.data)}`, 'error');
+    if (result.data) {
+      showResult(result.data);
+    }
   }
 
   btn.disabled = false;
-  btn.textContent = 'Lấy dữ liệu';
+  btn.textContent = 'Gọi API lấy Store List';
 });
 
 // Send to server button click
 document.getElementById('sendBtn').addEventListener('click', async () => {
-  if (!extractedData) {
-    showStatus('Chưa có dữ liệu! Hãy lấy dữ liệu trước.', 'error');
+  if (!fetchedData) {
+    showStatus('Chưa có dữ liệu! Hãy gọi API trước.', 'error');
     return;
   }
 
@@ -204,7 +213,7 @@ document.getElementById('sendBtn').addEventListener('click', async () => {
   btn.textContent = 'Đang gửi...';
   showStatus('Đang gửi dữ liệu lên server...', 'info');
 
-  const result = await sendToServer(extractedData);
+  const result = await sendToServer(fetchedData);
 
   if (result.success) {
     showStatus('Đã gửi dữ liệu thành công!', 'success');

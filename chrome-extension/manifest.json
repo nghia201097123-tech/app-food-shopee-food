@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Shopee Food Data Extractor",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Extract order data from Shopee Partner",
   "permissions": [
     "activeTab",
@@ -9,6 +9,8 @@
   ],
   "host_permissions": [
     "https://partner.shopee.vn/*",
+    "https://app.partner.shopee.vn/*",
+    "https://gmerchant.deliverynow.vn/*",
     "http://localhost:3000/*"
   ],
   "action": {
