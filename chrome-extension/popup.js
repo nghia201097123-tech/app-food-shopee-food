@@ -9,12 +9,13 @@ const API_ORDER_LIST = 'https://gmerchant.deliverynow.vn/api/v5/order/get_list';
 
 // Load saved settings
 document.addEventListener('DOMContentLoaded', async () => {
-  const saved = await chrome.storage.local.get(['userId', 'serverUrl', 'accessToken', 'entityId', 'autoSync']);
+  const saved = await chrome.storage.local.get(['userId', 'serverUrl', 'accessToken', 'entityId', 'userAgent', 'autoSync']);
 
   if (saved.userId) document.getElementById('userId').value = saved.userId;
   if (saved.serverUrl) document.getElementById('serverUrl').value = saved.serverUrl;
   if (saved.accessToken) document.getElementById('accessToken').value = saved.accessToken;
   if (saved.entityId) document.getElementById('entityId').value = saved.entityId;
+  if (saved.userAgent) document.getElementById('userAgent').value = saved.userAgent;
 
   // Restore auto-sync state
   if (saved.autoSync) {
@@ -24,7 +25,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // Save settings on change
-['userId', 'serverUrl', 'accessToken', 'entityId'].forEach(id => {
+['userId', 'serverUrl', 'accessToken', 'entityId', 'userAgent'].forEach(id => {
   document.getElementById(id).addEventListener('change', async (e) => {
     await chrome.storage.local.set({ [id]: e.target.value });
   });
@@ -87,6 +88,7 @@ async function fetchStoreList() {
 async function fetchOrderList() {
   const accessToken = document.getElementById('accessToken').value.trim();
   const entityId = document.getElementById('entityId').value.trim();
+  const userAgent = document.getElementById('userAgent').value.trim() || 'language=vi app_type=29';
 
   if (!accessToken) {
     return { success: false, error: 'Chưa nhập Access Token' };
@@ -103,7 +105,7 @@ async function fetchOrderList() {
         'Accept': 'application/json, text/plain, */*',
         'Accept-Encoding': 'gzip, deflate',
         'Accept-Language': 'vi-VN,vi,fr-FR,fr,en-US,en',
-        'user-agent': 'language=vi app_type=29',
+        'user-agent': userAgent,
         'x-foody-client-id': 'CD1C90F850C14104827124E1AC7F263A',
         'x-foody-access-token': accessToken,
         'x-foody-entity-id': entityId,
