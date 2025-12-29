@@ -1252,6 +1252,54 @@ app.delete("/api/customers/:customerId", (req, res) => {
 
 // ========== FETCH ĐƠN HÀNG TỰ ĐỘNG ==========
 
+// Cấu hình: Dùng Shortcut hay fetch trực tiếp
+let USE_SHORTCUT = false; // Đổi thành true nếu fetch bị block
+const SHORTCUT_NAME = "ShopeeOrders"; // Tên shortcut trên macOS
+
+// Hàm gọi Shopee API qua macOS Shortcut
+async function fetchViaShortcut(customer) {
+  const { customerId, entityId, accessToken, xSfTraceId, spcBOft, userAgent } = customer;
+
+  return new Promise((resolve, reject) => {
+    // Tạo file input tạm
+    const inputFile = `/tmp/shopee_input_${customerId}.json`;
+    const outputFile = `/tmp/shopee_output_${customerId}.json`;
+
+    const inputData = {
+      entityId,
+      accessToken,
+      xSfTraceId: xSfTraceId || "",
+      spcBOft: spcBOft || "",
+      userAgent: userAgent || "language=vi app_type=2"
+    };
+
+    fs.writeFileSync(inputFile, JSON.stringify(inputData));
+
+    // Chạy shortcut
+    const cmd = `shortcuts run "${SHORTCUT_NAME}" --input-path "${inputFile}" --output-path "${outputFile}"`;
+
+    exec(cmd, { timeout: 30000 }, (error, stdout, stderr) => {
+      // Đọc output
+      try {
+        if (fs.existsSync(outputFile)) {
+          const output = fs.readFileSync(outputFile, "utf8");
+          const data = JSON.parse(output);
+
+          // Cleanup
+          fs.unlinkSync(inputFile);
+          fs.unlinkSync(outputFile);
+
+          resolve(data);
+        } else {
+          reject(new Error("Shortcut không trả về output"));
+        }
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
+}
+
 // Hàm gọi API Shopee cho 1 khách hàng
 async function fetchOrdersForCustomer(customer) {
   const {
@@ -1263,9 +1311,39 @@ async function fetchOrdersForCustomer(customer) {
     userAgent
   } = customer;
 
-  console.log(`\n[Auto-Fetch] Đang fetch cho: ${customerId}...`);
+  console.log(`\n[Auto-Fetch] Đang fetch cho: ${customerId}... (mode: ${USE_SHORTCUT ? 'Shortcut' : 'Direct'})`);
 
   try {
+    // Nếu dùng Shortcut
+    if (USE_SHORTCUT) {
+      const data = await fetchViaShortcut(customer);
+
+      const result = {
+        customerId,
+        success: data.code === 0,
+        ordersCount: data.data?.length || 0,
+        data: data,
+        fetchedAt: new Date().toISOString(),
+        method: "shortcut"
+      };
+
+      fetchResults.set(customerId, result);
+
+      // Cập nhật lastFetch
+      const customers = loadCustomers();
+      const idx = customers.findIndex(c => c.customerId === customerId);
+      if (idx !== -1) {
+        customers[idx].lastFetch = new Date().toISOString();
+        customers[idx].lastFetchStatus = data.code === 0 ? "success" : "failed";
+        customers[idx].lastOrdersCount = data.data?.length || 0;
+        saveCustomers(customers);
+      }
+
+      console.log(`[Auto-Fetch] ${customerId}: ${data.code === 0 ? 'OK' : 'FAILED'} - ${data.data?.length || 0} đơn (Shortcut)`);
+      return result;
+    }
+
+    // Dùng fetch trực tiếp
     const headers = {
       "Content-Type": "application/json",
       "user-agent": userAgent || "language=vi app_type=2",
@@ -1468,7 +1546,45 @@ app.get("/api/auto-fetch/status", (req, res) => {
     success: true,
     isRunning: autoFetchInterval !== null,
     customersCount: loadCustomers().filter(c => c.status === "active").length,
-    resultsCount: fetchResults.size
+    resultsCount: fetchResults.size,
+    useShortcut: USE_SHORTCUT
+  });
+});
+
+// ========== CHẾ ĐỘ SHORTCUT ==========
+
+// API: Bật chế độ Shortcut (dùng khi fetch trực tiếp bị block)
+app.post("/api/config/use-shortcut", (req, res) => {
+  const { enable = true, shortcutName } = req.body;
+
+  USE_SHORTCUT = enable;
+
+  if (shortcutName) {
+    // Không thể thay đổi const, nhưng có thể log
+    console.log(`[Config] Shortcut name: ${shortcutName}`);
+  }
+
+  console.log(`[Config] Chế độ Shortcut: ${USE_SHORTCUT ? 'BẬT' : 'TẮT'}`);
+
+  return res.json({
+    success: true,
+    useShortcut: USE_SHORTCUT,
+    message: USE_SHORTCUT
+      ? `Đã bật chế độ Shortcut. Hãy tạo Shortcut "${SHORTCUT_NAME}" trên Mac.`
+      : "Đã tắt chế độ Shortcut, dùng fetch trực tiếp."
+  });
+});
+
+// API: Xem cấu hình hiện tại
+app.get("/api/config", (req, res) => {
+  return res.json({
+    success: true,
+    config: {
+      useShortcut: USE_SHORTCUT,
+      shortcutName: SHORTCUT_NAME,
+      customersCount: loadCustomers().length,
+      activeCustomers: loadCustomers().filter(c => c.status === "active").length
+    }
   });
 });
 
