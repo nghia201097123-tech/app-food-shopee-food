@@ -3,6 +3,7 @@ const puppeteer = require("puppeteer-extra");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 const fs = require("fs");
 const path = require("path");
+const { exec } = require("child_process");
 
 // Sử dụng Stealth Plugin để tránh bị detect
 puppeteer.use(StealthPlugin());
@@ -11,6 +12,29 @@ const app = express();
 app.use(express.json());
 
 const PROFILES_DIR = "./profiles";
+const CUSTOMERS_FILE = "./customers.json";
+
+// ========== QUẢN LÝ KHÁCH HÀNG ==========
+// Load customers từ file
+function loadCustomers() {
+  try {
+    if (fs.existsSync(CUSTOMERS_FILE)) {
+      const data = fs.readFileSync(CUSTOMERS_FILE, "utf8");
+      return JSON.parse(data);
+    }
+  } catch (e) {
+    console.log("Không thể load customers:", e.message);
+  }
+  return [];
+}
+
+// Save customers to file
+function saveCustomers(customers) {
+  fs.writeFileSync(CUSTOMERS_FILE, JSON.stringify(customers, null, 2));
+}
+
+// Lưu kết quả fetch
+const fetchResults = new Map();
 const activeSessions = new Map();
 
 // Queue để xử lý tuần tự, tránh quá tải
@@ -1094,6 +1118,362 @@ app.post("/api/shortcut/orders", (req, res) => {
     success: true,
     message: `Đã nhận data từ iOS Shortcut`,
     dataKey: dataKey
+  });
+});
+
+// ========== QUẢN LÝ KHÁCH HÀNG - CRUD APIs ==========
+
+// Lấy danh sách khách hàng
+app.get("/api/customers", (req, res) => {
+  const customers = loadCustomers();
+  // Ẩn token khi trả về
+  const safeCustomers = customers.map(c => ({
+    ...c,
+    accessToken: c.accessToken ? `${c.accessToken.substring(0, 10)}...` : null
+  }));
+
+  return res.json({
+    success: true,
+    total: customers.length,
+    customers: safeCustomers
+  });
+});
+
+// Thêm khách hàng mới
+app.post("/api/customers", (req, res) => {
+  const {
+    customerId,      // ID duy nhất (vd: "shop_001")
+    name,            // Tên khách hàng
+    entityId,        // x-foody-entity-id
+    accessToken,     // x-foody-access-token
+    xSfTraceId,      // x-sf-trace-id (optional)
+    spcBOft,         // spc-b-oft (optional)
+    userAgent = "language=vi app_type=29"
+  } = req.body;
+
+  if (!customerId || !entityId || !accessToken) {
+    return res.status(400).json({
+      success: false,
+      error: "Thiếu customerId, entityId hoặc accessToken"
+    });
+  }
+
+  const customers = loadCustomers();
+
+  // Kiểm tra trùng
+  if (customers.find(c => c.customerId === customerId)) {
+    return res.status(400).json({
+      success: false,
+      error: "customerId đã tồn tại"
+    });
+  }
+
+  const newCustomer = {
+    customerId,
+    name: name || customerId,
+    entityId,
+    accessToken,
+    xSfTraceId: xSfTraceId || "",
+    spcBOft: spcBOft || "",
+    userAgent,
+    createdAt: new Date().toISOString(),
+    lastFetch: null,
+    status: "active"
+  };
+
+  customers.push(newCustomer);
+  saveCustomers(customers);
+
+  console.log(`[Customer] Thêm mới: ${customerId} (${name})`);
+
+  return res.json({
+    success: true,
+    message: "Đã thêm khách hàng",
+    customer: { ...newCustomer, accessToken: `${accessToken.substring(0, 10)}...` }
+  });
+});
+
+// Cập nhật khách hàng
+app.put("/api/customers/:customerId", (req, res) => {
+  const { customerId } = req.params;
+  const updates = req.body;
+
+  const customers = loadCustomers();
+  const index = customers.findIndex(c => c.customerId === customerId);
+
+  if (index === -1) {
+    return res.status(404).json({
+      success: false,
+      error: "Không tìm thấy khách hàng"
+    });
+  }
+
+  // Cập nhật các field được phép
+  const allowedFields = ['name', 'entityId', 'accessToken', 'xSfTraceId', 'spcBOft', 'userAgent', 'status'];
+  allowedFields.forEach(field => {
+    if (updates[field] !== undefined) {
+      customers[index][field] = updates[field];
+    }
+  });
+  customers[index].updatedAt = new Date().toISOString();
+
+  saveCustomers(customers);
+  console.log(`[Customer] Cập nhật: ${customerId}`);
+
+  return res.json({
+    success: true,
+    message: "Đã cập nhật khách hàng"
+  });
+});
+
+// Xóa khách hàng
+app.delete("/api/customers/:customerId", (req, res) => {
+  const { customerId } = req.params;
+
+  let customers = loadCustomers();
+  const index = customers.findIndex(c => c.customerId === customerId);
+
+  if (index === -1) {
+    return res.status(404).json({
+      success: false,
+      error: "Không tìm thấy khách hàng"
+    });
+  }
+
+  customers.splice(index, 1);
+  saveCustomers(customers);
+  console.log(`[Customer] Xóa: ${customerId}`);
+
+  return res.json({
+    success: true,
+    message: "Đã xóa khách hàng"
+  });
+});
+
+// ========== FETCH ĐƠN HÀNG TỰ ĐỘNG ==========
+
+// Hàm gọi API Shopee cho 1 khách hàng (dùng Shortcut trên macOS)
+async function fetchOrdersForCustomer(customer) {
+  const {
+    customerId,
+    entityId,
+    accessToken,
+    xSfTraceId,
+    spcBOft,
+    userAgent
+  } = customer;
+
+  console.log(`\n[Auto-Fetch] Đang fetch cho: ${customerId}...`);
+
+  try {
+    const headers = {
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+      "user-agent": userAgent || "language=vi app_type=29",
+      "x-foody-client-id": "CD1C90F850C14104827124E1AC7F263A",
+      "x-foody-access-token": accessToken,
+      "x-foody-entity-id": entityId,
+      "x-foody-client-type": "1",
+      "x-foody-app-type": "1024",
+      "x-foody-api-version": "1",
+      "x-foody-client-language": "vi",
+      "x-foody-client-version": "3.0.0"
+    };
+
+    // Thêm optional headers nếu có
+    if (xSfTraceId) headers["x-sf-trace-id"] = xSfTraceId;
+    if (spcBOft) headers["spc-b-oft"] = spcBOft;
+
+    const response = await fetch("https://gmerchant.deliverynow.vn/api/v5/order/get_list", {
+      method: "POST",
+      headers: headers,
+      body: JSON.stringify({
+        order_filter_type: 31,
+        next_item_id: "",
+        request_count: 50,
+        sort_type: 5
+      })
+    });
+
+    const data = await response.json();
+
+    // Lưu kết quả
+    const result = {
+      customerId,
+      success: data.code === 0,
+      ordersCount: data.data?.length || 0,
+      data: data,
+      fetchedAt: new Date().toISOString()
+    };
+
+    fetchResults.set(customerId, result);
+
+    // Cập nhật lastFetch trong customers
+    const customers = loadCustomers();
+    const idx = customers.findIndex(c => c.customerId === customerId);
+    if (idx !== -1) {
+      customers[idx].lastFetch = new Date().toISOString();
+      customers[idx].lastFetchStatus = data.code === 0 ? "success" : "failed";
+      customers[idx].lastOrdersCount = data.data?.length || 0;
+      saveCustomers(customers);
+    }
+
+    console.log(`[Auto-Fetch] ${customerId}: ${data.code === 0 ? 'OK' : 'FAILED'} - ${data.data?.length || 0} đơn`);
+
+    return result;
+  } catch (error) {
+    console.log(`[Auto-Fetch] ${customerId}: ERROR - ${error.message}`);
+
+    const result = {
+      customerId,
+      success: false,
+      error: error.message,
+      fetchedAt: new Date().toISOString()
+    };
+    fetchResults.set(customerId, result);
+
+    return result;
+  }
+}
+
+// Fetch tất cả khách hàng
+async function fetchAllCustomers() {
+  const customers = loadCustomers().filter(c => c.status === "active");
+
+  if (customers.length === 0) {
+    console.log("[Auto-Fetch] Không có khách hàng active");
+    return [];
+  }
+
+  console.log(`\n========== [Auto-Fetch] Bắt đầu fetch ${customers.length} khách hàng ==========`);
+
+  const results = [];
+
+  // Fetch tuần tự để tránh bị rate limit
+  for (const customer of customers) {
+    const result = await fetchOrdersForCustomer(customer);
+    results.push(result);
+
+    // Delay 2 giây giữa mỗi request
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+
+  const successCount = results.filter(r => r.success).length;
+  console.log(`========== [Auto-Fetch] Hoàn thành: ${successCount}/${customers.length} thành công ==========\n`);
+
+  return results;
+}
+
+// API: Fetch thủ công tất cả khách hàng
+app.post("/api/customers/fetch-all", async (req, res) => {
+  const results = await fetchAllCustomers();
+
+  return res.json({
+    success: true,
+    total: results.length,
+    successCount: results.filter(r => r.success).length,
+    results: results
+  });
+});
+
+// API: Fetch 1 khách hàng cụ thể
+app.post("/api/customers/:customerId/fetch", async (req, res) => {
+  const { customerId } = req.params;
+
+  const customers = loadCustomers();
+  const customer = customers.find(c => c.customerId === customerId);
+
+  if (!customer) {
+    return res.status(404).json({
+      success: false,
+      error: "Không tìm thấy khách hàng"
+    });
+  }
+
+  const result = await fetchOrdersForCustomer(customer);
+
+  return res.json(result);
+});
+
+// API: Lấy kết quả fetch gần nhất
+app.get("/api/customers/:customerId/orders", (req, res) => {
+  const { customerId } = req.params;
+
+  const result = fetchResults.get(customerId);
+
+  if (!result) {
+    return res.status(404).json({
+      success: false,
+      error: "Chưa có dữ liệu. Hãy fetch trước."
+    });
+  }
+
+  return res.json(result);
+});
+
+// API: Lấy tất cả kết quả fetch
+app.get("/api/orders/all", (req, res) => {
+  const allResults = [];
+  fetchResults.forEach((value, key) => {
+    allResults.push(value);
+  });
+
+  return res.json({
+    success: true,
+    total: allResults.length,
+    results: allResults
+  });
+});
+
+// ========== AUTO FETCH ĐỊNH KỲ ==========
+let autoFetchInterval = null;
+
+// API: Bật auto-fetch
+app.post("/api/auto-fetch/start", (req, res) => {
+  const { intervalMinutes = 5 } = req.body;
+
+  if (autoFetchInterval) {
+    clearInterval(autoFetchInterval);
+  }
+
+  const intervalMs = intervalMinutes * 60 * 1000;
+
+  autoFetchInterval = setInterval(async () => {
+    await fetchAllCustomers();
+  }, intervalMs);
+
+  console.log(`[Auto-Fetch] Đã bật auto-fetch mỗi ${intervalMinutes} phút`);
+
+  // Fetch ngay lập tức lần đầu
+  fetchAllCustomers();
+
+  return res.json({
+    success: true,
+    message: `Auto-fetch đã bật, chạy mỗi ${intervalMinutes} phút`
+  });
+});
+
+// API: Tắt auto-fetch
+app.post("/api/auto-fetch/stop", (req, res) => {
+  if (autoFetchInterval) {
+    clearInterval(autoFetchInterval);
+    autoFetchInterval = null;
+    console.log("[Auto-Fetch] Đã tắt auto-fetch");
+  }
+
+  return res.json({
+    success: true,
+    message: "Auto-fetch đã tắt"
+  });
+});
+
+// API: Trạng thái auto-fetch
+app.get("/api/auto-fetch/status", (req, res) => {
+  return res.json({
+    success: true,
+    isRunning: autoFetchInterval !== null,
+    customersCount: loadCustomers().filter(c => c.status === "active").length,
+    resultsCount: fetchResults.size
   });
 });
 
