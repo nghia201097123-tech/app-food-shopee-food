@@ -101,10 +101,17 @@ async function fetchOrderList() {
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json, text/plain, */*',
-        'user-agent': 'language=vi app_type=2',
+        'Accept-Encoding': 'gzip, deflate',
+        'Accept-Language': 'vi-VN,vi,fr-FR,fr,en-US,en',
+        'x-foody-client-id': 'CD1C90F850C14104827124E1AC7F263A',
         'x-foody-access-token': accessToken,
+        'x-foody-entity-id': entityId,
+        'x-foody-client-language': 'vi',
+        'x-foody-api-version': '1',
         'x-foody-app-type': '1024',
-        'x-foody-entity-id': entityId
+        'x-foody-client-type': '1',
+        'x-foody-client-version': '3.0.0',
+        'operate-source': 'partnerapp'
       },
       body: JSON.stringify({
         order_filter_type: 31,
