@@ -1255,6 +1255,7 @@ app.delete("/api/customers/:customerId", (req, res) => {
 // Cấu hình: Dùng Shortcut hay fetch trực tiếp
 let USE_SHORTCUT = false; // Đổi thành true nếu fetch bị block
 const SHORTCUT_NAME = "ShopeeOrders"; // Tên shortcut trên macOS
+let PARALLEL_LIMIT = 10; // Số lượng Shortcuts chạy song song (có thể thay đổi)
 
 // Hàm gọi Shopee API qua macOS Shortcut
 async function fetchViaShortcut(customer) {
@@ -1409,7 +1410,16 @@ async function fetchOrdersForCustomer(customer) {
   }
 }
 
-// Fetch tất cả khách hàng
+// Hàm chia array thành chunks
+function chunkArray(array, chunkSize) {
+  const chunks = [];
+  for (let i = 0; i < array.length; i += chunkSize) {
+    chunks.push(array.slice(i, i + chunkSize));
+  }
+  return chunks;
+}
+
+// Fetch tất cả khách hàng (PARALLEL)
 async function fetchAllCustomers() {
   const customers = loadCustomers().filter(c => c.status === "active");
 
@@ -1418,21 +1428,44 @@ async function fetchAllCustomers() {
     return [];
   }
 
-  console.log(`\n========== [Auto-Fetch] Bắt đầu fetch ${customers.length} khách hàng ==========`);
+  console.log(`\n========== [Auto-Fetch] Bắt đầu fetch ${customers.length} khách hàng (${PARALLEL_LIMIT} parallel) ==========`);
+  const startTime = Date.now();
 
   const results = [];
 
-  // Fetch tuần tự để tránh bị rate limit
-  for (const customer of customers) {
-    const result = await fetchOrdersForCustomer(customer);
-    results.push(result);
+  // Chia customers thành batches
+  const batches = chunkArray(customers, PARALLEL_LIMIT);
+  console.log(`[Auto-Fetch] Chia thành ${batches.length} batches, mỗi batch ${PARALLEL_LIMIT} customers`);
 
-    // Delay 2 giây giữa mỗi request
-    await new Promise(resolve => setTimeout(resolve, 2000));
+  for (let i = 0; i < batches.length; i++) {
+    const batch = batches[i];
+    console.log(`\n[Auto-Fetch] Batch ${i + 1}/${batches.length}: Đang fetch ${batch.length} customers...`);
+
+    // Chạy parallel cho mỗi batch
+    const batchResults = await Promise.all(
+      batch.map(customer => fetchOrdersForCustomer(customer))
+    );
+
+    results.push(...batchResults);
+
+    const batchSuccess = batchResults.filter(r => r.success).length;
+    console.log(`[Auto-Fetch] Batch ${i + 1} hoàn thành: ${batchSuccess}/${batch.length} thành công`);
+
+    // Delay 1 giây giữa các batches để tránh quá tải
+    if (i < batches.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
   }
 
+  const endTime = Date.now();
+  const duration = ((endTime - startTime) / 1000).toFixed(1);
   const successCount = results.filter(r => r.success).length;
-  console.log(`========== [Auto-Fetch] Hoàn thành: ${successCount}/${customers.length} thành công ==========\n`);
+
+  console.log(`\n========== [Auto-Fetch] Hoàn thành ==========`);
+  console.log(`Tổng: ${successCount}/${customers.length} thành công`);
+  console.log(`Thời gian: ${duration} giây`);
+  console.log(`Throughput: ${(customers.length / duration * 1).toFixed(1)} req/s`);
+  console.log(`================================================\n`);
 
   return results;
 }
@@ -1582,9 +1615,31 @@ app.get("/api/config", (req, res) => {
     config: {
       useShortcut: USE_SHORTCUT,
       shortcutName: SHORTCUT_NAME,
+      parallelLimit: PARALLEL_LIMIT,
       customersCount: loadCustomers().length,
       activeCustomers: loadCustomers().filter(c => c.status === "active").length
     }
+  });
+});
+
+// API: Thay đổi số lượng parallel
+app.post("/api/config/parallel", (req, res) => {
+  const { limit } = req.body;
+
+  if (!limit || limit < 1 || limit > 50) {
+    return res.status(400).json({
+      success: false,
+      error: "limit phải từ 1 đến 50"
+    });
+  }
+
+  PARALLEL_LIMIT = limit;
+  console.log(`[Config] Parallel limit: ${PARALLEL_LIMIT}`);
+
+  return res.json({
+    success: true,
+    parallelLimit: PARALLEL_LIMIT,
+    message: `Đã đặt parallel limit = ${PARALLEL_LIMIT}`
   });
 });
 
