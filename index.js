@@ -1257,37 +1257,31 @@ let USE_SHORTCUT = false; // Đổi thành true nếu fetch bị block
 const SHORTCUT_NAME = "ShopeeOrders"; // Tên shortcut trên macOS
 let PARALLEL_LIMIT = 10; // Số lượng Shortcuts chạy song song (có thể thay đổi)
 
-// Hàm gọi Shopee API qua macOS Shortcut
+// Hàm gọi Shopee API qua macOS Shortcut (dùng Clipboard)
 async function fetchViaShortcut(customer) {
-  const { customerId, entityId, accessToken, xSfTraceId, spcBOft, userAgent } = customer;
+  const { customerId, entityId, accessToken } = customer;
 
   return new Promise((resolve, reject) => {
-    // Tạo file input tạm
-    const inputFile = `/tmp/shopee_input_${customerId}.json`;
-    const outputFile = `/tmp/shopee_output_${customerId}.json`;
+    const outputFile = `/tmp/shopee_output_${customerId}_${Date.now()}.json`;
 
-    const inputData = {
-      entityId,
-      accessToken,
-      xSfTraceId: xSfTraceId || "",
-      spcBOft: spcBOft || "",
-      userAgent: userAgent || "language=vi app_type=2"
-    };
+    // Tạo JSON input (chỉ cần entityId và accessToken)
+    const inputJson = JSON.stringify({ entityId, accessToken });
 
-    fs.writeFileSync(inputFile, JSON.stringify(inputData));
-
-    // Chạy shortcut
-    const cmd = `shortcuts run "${SHORTCUT_NAME}" --input-path "${inputFile}" --output-path "${outputFile}"`;
+    // Copy JSON vào clipboard và chạy shortcut
+    const cmd = `echo '${inputJson}' | pbcopy && shortcuts run "${SHORTCUT_NAME}" --output-path "${outputFile}"`;
 
     exec(cmd, { timeout: 30000 }, (error, stdout, stderr) => {
-      // Đọc output
       try {
+        if (error) {
+          reject(new Error(`Shortcut error: ${error.message}`));
+          return;
+        }
+
         if (fs.existsSync(outputFile)) {
           const output = fs.readFileSync(outputFile, "utf8");
           const data = JSON.parse(output);
 
           // Cleanup
-          fs.unlinkSync(inputFile);
           fs.unlinkSync(outputFile);
 
           resolve(data);
@@ -1582,6 +1576,65 @@ app.get("/api/auto-fetch/status", (req, res) => {
     resultsCount: fetchResults.size,
     useShortcut: USE_SHORTCUT
   });
+});
+
+// ========== API: Gọi Shortcut trực tiếp ==========
+
+// API: Test gọi Shortcut với entityId và accessToken
+app.post("/api/shortcut/fetch", async (req, res) => {
+  const { entityId, accessToken } = req.body;
+
+  if (!entityId || !accessToken) {
+    return res.status(400).json({
+      success: false,
+      error: "Thiếu entityId hoặc accessToken"
+    });
+  }
+
+  console.log(`\n[Shortcut API] Fetching for entityId: ${entityId}`);
+
+  try {
+    const outputFile = `/tmp/shopee_output_${Date.now()}.json`;
+    const inputJson = JSON.stringify({ entityId, accessToken });
+
+    // Copy JSON vào clipboard và chạy shortcut
+    const cmd = `echo '${inputJson}' | pbcopy && shortcuts run "${SHORTCUT_NAME}" --output-path "${outputFile}"`;
+
+    const result = await new Promise((resolve, reject) => {
+      exec(cmd, { timeout: 30000 }, (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(`Shortcut error: ${error.message}`));
+          return;
+        }
+
+        try {
+          if (fs.existsSync(outputFile)) {
+            const output = fs.readFileSync(outputFile, "utf8");
+            const data = JSON.parse(output);
+            fs.unlinkSync(outputFile);
+            resolve(data);
+          } else {
+            reject(new Error("Shortcut không trả về output"));
+          }
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+
+    console.log(`[Shortcut API] Result: code=${result.code}, orders=${result.data?.orders?.length || 0}`);
+
+    return res.json({
+      success: result.code === 0,
+      data: result
+    });
+  } catch (error) {
+    console.log(`[Shortcut API] Error: ${error.message}`);
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
 });
 
 // ========== CHẾ ĐỘ SHORTCUT ==========
