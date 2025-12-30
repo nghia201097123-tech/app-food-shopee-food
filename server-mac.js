@@ -34,13 +34,16 @@ app.post("/api/shortcut/fetch", async (req, res) => {
 
   console.log(`\n[Shortcut] Fetching for entityId: ${entityId}`);
 
-  const outputFile = `/tmp/shopee_out_${Date.now()}.json`;
+  const timestamp = Date.now();
+  const inputFile = `/tmp/shopee_input_${timestamp}.json`;
+  const outputFile = `/tmp/shopee_out_${timestamp}.json`;
+
+  // Ghi JSON vào file (tránh lỗi với ký tự đặc biệt như /)
   const inputJson = JSON.stringify({ entityId, accessToken });
+  fs.writeFileSync(inputFile, inputJson);
 
-  // Escape single quotes trong JSON
-  const escapedJson = inputJson.replace(/'/g, "'\\''");
-
-  const cmd = `echo '${escapedJson}' | pbcopy && shortcuts run "${SHORTCUT_NAME}" --output-path "${outputFile}"`;
+  // Dùng cat để copy file vào clipboard (an toàn với mọi ký tự)
+  const cmd = `cat "${inputFile}" | pbcopy && shortcuts run "${SHORTCUT_NAME}" --output-path "${outputFile}"`;
 
   console.log(`[Shortcut] Running command...`);
 
@@ -48,11 +51,14 @@ app.post("/api/shortcut/fetch", async (req, res) => {
     // Dùng execSync để chờ kết quả
     execSync(cmd, { timeout: 30000, encoding: "utf8" });
 
+    // Cleanup input file
+    if (fs.existsSync(inputFile)) fs.unlinkSync(inputFile);
+
     if (fs.existsSync(outputFile)) {
       const output = fs.readFileSync(outputFile, "utf8");
       const data = JSON.parse(output);
 
-      // Cleanup
+      // Cleanup output file
       fs.unlinkSync(outputFile);
 
       console.log(`[Shortcut] Success: code=${data.code}`);
@@ -70,6 +76,9 @@ app.post("/api/shortcut/fetch", async (req, res) => {
     }
   } catch (error) {
     console.log(`[Shortcut] Error: ${error.message}`);
+
+    // Cleanup input file
+    if (fs.existsSync(inputFile)) fs.unlinkSync(inputFile);
 
     // Kiểm tra nếu output file vẫn tồn tại (shortcut có thể đã chạy nhưng có warning)
     if (fs.existsSync(outputFile)) {
