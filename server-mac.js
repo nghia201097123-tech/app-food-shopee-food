@@ -42,8 +42,8 @@ app.post("/api/shortcut/fetch", async (req, res) => {
   const inputJson = JSON.stringify({ entityId, accessToken });
   fs.writeFileSync(inputFile, inputJson);
 
-  // Dùng cat để copy file vào clipboard (an toàn với mọi ký tự)
-  const cmd = `cat "${inputFile}" | pbcopy && shortcuts run "${SHORTCUT_NAME}" --output-path "${outputFile}"`;
+  // Dùng pbcopy < file (hoạt động tốt hơn cat | pbcopy)
+  const cmd = `pbcopy < "${inputFile}" && shortcuts run "${SHORTCUT_NAME}" --output-path "${outputFile}"`;
 
   console.log(`[Shortcut] Running command...`);
 
